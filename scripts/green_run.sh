@@ -133,12 +133,23 @@ if [[ -f "$REPORT" ]]; then
   line="$(grep -m1 '^FINGERPRINT:' "$REPORT" || true)"
   if [[ -n "$line" ]]; then
     echo "${line/FINGERPRINT:/FINGERPRINT $TASK:}"
+    # digits-only, label-preserving code: impossible to distort when retyped
+    #   ok=1  route_fail=0  other=2  skip/n-a=9
+    code="$(printf '%s' "${line#FINGERPRINT:}" \
+      | sed -E 's/[[:space:]]*=[[:space:]]*/=/g; s/=ok/=1/g; s/=route_fail/=0/g; s/=other/=2/g; s/=skip/=9/g; s#=n/a#=9#g' \
+      | tr -d '=')"
+    echo
+    echo "SEND THIS ONE LINE >>> $TASK $code"
   else
     echo "(no FINGERPRINT in report; last 5 lines)"
     tail -5 "$REPORT"
+    echo
+    echo "SEND THIS ONE LINE >>> $TASK noreport"
   fi
 else
   echo "(no $REPORT; check tasks/$TASK/debug/run.sh)"
+  echo
+  echo "SEND THIS ONE LINE >>> $TASK noreport"
 fi
 echo "=========================================================="
 echo "logs (do not export): $OUT"

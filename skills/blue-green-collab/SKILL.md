@@ -89,9 +89,10 @@ then restores the worktree. `--keep` leaves the patch applied; `--revert` only u
 
 ### Phase 4 — report back
 
-Ask for **only** the `FINGERPRINT:` line (and the first error line if
-everything failed). Then update `manifest.tsv`/`README.md`, write the real fix
-as `patches/<repo>/NNNN-*.patch`, and repeat from Phase 2.
+Ask for **only** the `SEND THIS ONE LINE >>> <task-id> A0 B1 C0 D0 E2` output (digits
+only, so retyping cannot distort it), plus the first error line if everything failed.
+Then update `tasks/<id>/README.md` + `tasks/README.md`, write the real fix as
+`patches/<repo>/NNNN-*.patch`, and repeat from Phase 2.
 
 ### Phase 5 — promote
 
