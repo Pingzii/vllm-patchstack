@@ -1,4 +1,0 @@
-# repo	kind	path	desc
-# kind = patch  : patches/<repo>/NNNN-*.patch，用 git apply --check 校验后应用
-# kind = script : debug/*.py，自身带锚点校验与 --revert
-vllm-ascend	script	debug/apply_mxfp_variants.py	W4A8MXFP AllToAll routing 入参变体开关（诊断用，A~E 变体）

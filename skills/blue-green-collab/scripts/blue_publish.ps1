@@ -35,8 +35,10 @@ Write-Host "[publish] skill=$SkillDir"
 git clone --quiet $RepoUrl $work
 if ($LASTEXITCODE -ne 0) { throw "clone failed: $RepoUrl" }
 
-# 1) patch stack itself (tasks/<id>/ with its own patches + debug live here)
+# 1) mirror the working copy: wipe everything but .git so deleted files really disappear
+Get-ChildItem -Force $work | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
 Copy-Item (Join-Path $Patchstack '*') $work -Recurse -Force
+Copy-Item (Join-Path $Patchstack '.gitignore') $work -Force -ErrorAction SilentlyContinue
 Get-ChildItem -Path $work -Recurse -Directory -Filter '__pycache__' |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 # 2) this skill
