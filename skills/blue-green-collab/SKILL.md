@@ -70,13 +70,22 @@ Sanity-check afterwards: the repo tree must contain `.gitignore`, no
 
 ### Phase 3 — run (green side, one command)
 
+Everything the green zone does is one script; nothing else needs typing.
+
 ```bash
-bash /tmp/patchstack/scripts/green_run.sh      # sync → apply → run → report → revert
+# A) absolute one-liner (nothing pre-installed on the green side)
+curl -fsSL https://raw.githubusercontent.com/Pingzii/vllm-patchstack/main/scripts/onekey.sh | bash -s -- --task <id>
+
+# B) after one alias install (green_bootstrap.sh) it is a single word
+dsv4run --task <id>            # sync -> apply -> run -> report -> revert
+dsv4run --dry-run --task <id>  # show the plan, change nothing (for reviewers)
+dsv4run --list                 # list tasks
 ```
 
-`green_run.sh` auto-discovers the repo root, prints the resolved versions, and
-finishes with a single `FINGERPRINT:` line. Add `--keep` to leave the patch
-applied for manual poking, `--revert` to only undo.
+`green_run.sh` auto-detects the framework checkout, resolves the task, runs
+preflight checks (python3, a busy `vllm serve`), applies the task manifest, runs
+`tasks/<id>/debug/run.sh`, prints exactly one `FINGERPRINT <task-id>: ...` line,
+then restores the worktree. `--keep` leaves the patch applied; `--revert` only undoes.
 
 ### Phase 4 — report back
 
@@ -103,9 +112,14 @@ namespaced by task id, and the report line is `FINGERPRINT <task-id>: ...`.
 | Script | Side | Purpose |
 |---|---|---|
 | `scripts/blue_publish.ps1` | blue | publish patch stack (all tasks) + this skill |
+| `scripts/onekey.sh` | green | **one-key entry**: fetch (if needed) + run one task |
 | `scripts/green_bootstrap.sh` | green | print/install the aliases (`dsv4sync/dsv4run/dsv4back`) |
 | `scripts/green_run.sh` | green | whole green-side loop for one task: `--task <id>` |
 | `apply_all.sh` / `revert_all.sh` | both | apply/revert one task's manifest: `--task <id>` |
+
+The only irreducible manual step is **entering that one command once** in the
+green zone (the agent cannot execute there). After `green_bootstrap.sh --install`
+it becomes a single word.
 
 Exit codes: `0` success, `2` misuse/missing input, non-zero from a script means
 that patch failed (`git apply --check` mismatch) — report it, do not work around
