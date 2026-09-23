@@ -1,27 +1,31 @@
-# 蓝区/中转机：把工作区里的补丁栈 + debug 包 + 本 skill 发布到补丁栈仓库。
+# Blue zone / transfer host: publish the patch stack + debug package + this skill.
 #
-#   pwsh -File scripts\blue_publish.ps1
-#   pwsh -File scripts\blue_publish.ps1 -RepoUrl https://github.com/Pingzii/vllm-patchstack.git
+#   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1
+#   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1 -RepoUrl https://github.com/Pingzii/vllm-patchstack.git
 #
-# 严禁在绿区执行（绿区单向只读，任何外发都违规）。
+# NEVER run this in the green zone: the green zone is read-only and any outbound
+# write (push/upload) is a compliance violation.
+#
+# NOTE: keep this file ASCII-only. Windows PowerShell 5.1 reads .ps1 as ANSI
+# unless a BOM is present, so non-ASCII comments break parsing on CN systems.
 param(
-    [string]$RepoUrl     = "https://github.com/Pingzii/vllm-patchstack.git",
-    [string]$Branch      = "main",
-    [string]$Workspace   = "",
-    [string]$Patchstack  = "",
-    [string]$DebugPkg    = "",
-    [string]$SkillDir    = ""
+    [string]$RepoUrl    = "https://github.com/Pingzii/vllm-patchstack.git",
+    [string]$Branch     = "main",
+    [string]$Workspace  = "",
+    [string]$Patchstack = "",
+    [string]$DebugPkg   = "",
+    [string]$SkillDir   = ""
 )
 $ErrorActionPreference = "Stop"
 
-$skillRoot = Split-Path -Parent $PSScriptRoot                 # ...\blue-green-collab
+$skillRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Workspace)  { $Workspace  = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $skillRoot)) }
 if (-not $Patchstack) { $Patchstack = Join-Path $Workspace 'vllm-patchstack' }
 if (-not $DebugPkg)   { $DebugPkg   = Join-Path $Workspace 'dsv4-mxfp-debug' }
 if (-not $SkillDir)   { $SkillDir   = $skillRoot }
 
-if (-not (Test-Path (Join-Path $Patchstack 'manifest.tsv'))) { throw "找不到补丁栈工作区: $Patchstack" }
-if (-not (git config --get user.name)) { throw "先设置 git config --global user.name" }
+if (-not (Test-Path (Join-Path $Patchstack 'manifest.tsv'))) { throw "patch stack working copy not found: $Patchstack" }
+if (-not (git config --get user.name)) { throw "set git config --global user.name first" }
 
 $work = Join-Path $env:TEMP ("patchstack-pub-" + (Get-Random))
 $env:GIT_TERMINAL_PROMPT = '0'
@@ -31,17 +35,17 @@ Write-Host "[publish] debug=$DebugPkg"
 Write-Host "[publish] skill=$SkillDir"
 
 git clone --quiet $RepoUrl $work
-if ($LASTEXITCODE -ne 0) { throw "clone 失败: $RepoUrl" }
+if ($LASTEXITCODE -ne 0) { throw "clone failed: $RepoUrl" }
 
-# 1) 补丁栈本体
+# 1) patch stack itself
 Copy-Item (Join-Path $Patchstack '*') $work -Recurse -Force
-# 2) debug 包（去掉本地缓存）
+# 2) debug package (drop local caches)
 if (Test-Path $DebugPkg) {
     New-Item -ItemType Directory -Force (Join-Path $work 'debug') | Out-Null
     Copy-Item (Join-Path $DebugPkg '*') (Join-Path $work 'debug\') -Recurse -Force -Exclude '__pycache__'
 }
 Remove-Item -Recurse -Force (Join-Path $work 'debug\__pycache__') -ErrorAction SilentlyContinue
-# 3) 本 skill
+# 3) this skill
 $dest = Join-Path $work 'skills\blue-green-collab'
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $SkillDir '*') $dest -Recurse -Force -Exclude '__pycache__'
