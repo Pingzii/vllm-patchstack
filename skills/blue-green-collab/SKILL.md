@@ -93,12 +93,19 @@ part of the upstream PR.
 
 ## Automation contract
 
+**Everything is per task.** A task is a directory `tasks/<task-id>/` holding its own
+`manifest.tsv`, `patches/` and `debug/`; the scripts take `--task <id>` and refuse to
+guess when several tasks exist. Read
+[`references/multi-task.md`](references/multi-task.md) before running more than one
+task in the same week — one experiment runs exactly one task, results and reports are
+namespaced by task id, and the report line is `FINGERPRINT <task-id>: ...`.
+
 | Script | Side | Purpose |
 |---|---|---|
-| `scripts/blue_publish.ps1` | blue | publish patch-stack + `debug/` + this skill |
-| `scripts/green_bootstrap.sh` | green | print/install the three aliases (`dsv4sync/dsv4apply/dsv4back`) |
-| `scripts/green_run.sh` | green | the whole green-side loop in one command |
-| `apply_all.sh` / `revert_all.sh` | both | apply/revert everything in `manifest.tsv` |
+| `scripts/blue_publish.ps1` | blue | publish patch stack (all tasks) + this skill |
+| `scripts/green_bootstrap.sh` | green | print/install the aliases (`dsv4sync/dsv4run/dsv4back`) |
+| `scripts/green_run.sh` | green | whole green-side loop for one task: `--task <id>` |
+| `apply_all.sh` / `revert_all.sh` | both | apply/revert one task's manifest: `--task <id>` |
 
 Exit codes: `0` success, `2` misuse/missing input, non-zero from a script means
 that patch failed (`git apply --check` mismatch) — report it, do not work around

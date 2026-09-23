@@ -13,7 +13,6 @@ param(
     [string]$Branch     = "main",
     [string]$Workspace  = "",
     [string]$Patchstack = "",
-    [string]$DebugPkg   = "",
     [string]$SkillDir   = ""
 )
 $ErrorActionPreference = "Stop"
@@ -21,31 +20,26 @@ $ErrorActionPreference = "Stop"
 $skillRoot = Split-Path -Parent $PSScriptRoot
 if (-not $Workspace)  { $Workspace  = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $skillRoot)) }
 if (-not $Patchstack) { $Patchstack = Join-Path $Workspace 'vllm-patchstack' }
-if (-not $DebugPkg)   { $DebugPkg   = Join-Path $Workspace 'dsv4-mxfp-debug' }
 if (-not $SkillDir)   { $SkillDir   = $skillRoot }
 
-if (-not (Test-Path (Join-Path $Patchstack 'manifest.tsv'))) { throw "patch stack working copy not found: $Patchstack" }
+if (-not (Test-Path (Join-Path $Patchstack 'tasks'))) { throw "patch stack working copy not found (no tasks/): $Patchstack" }
+if (-not (Test-Path (Join-Path $Patchstack 'apply_all.sh'))) { throw "patch stack working copy looks incomplete: $Patchstack" }
 if (-not (git config --get user.name)) { throw "set git config --global user.name first" }
 
 $work = Join-Path $env:TEMP ("patchstack-pub-" + (Get-Random))
 $env:GIT_TERMINAL_PROMPT = '0'
 Write-Host "[publish] repo=$RepoUrl"
 Write-Host "[publish] patchstack=$Patchstack"
-Write-Host "[publish] debug=$DebugPkg"
 Write-Host "[publish] skill=$SkillDir"
 
 git clone --quiet $RepoUrl $work
 if ($LASTEXITCODE -ne 0) { throw "clone failed: $RepoUrl" }
 
-# 1) patch stack itself
+# 1) patch stack itself (tasks/<id>/ with its own patches + debug live here)
 Copy-Item (Join-Path $Patchstack '*') $work -Recurse -Force
-# 2) debug package (drop local caches)
-if (Test-Path $DebugPkg) {
-    New-Item -ItemType Directory -Force (Join-Path $work 'debug') | Out-Null
-    Copy-Item (Join-Path $DebugPkg '*') (Join-Path $work 'debug\') -Recurse -Force -Exclude '__pycache__'
-}
-Remove-Item -Recurse -Force (Join-Path $work 'debug\__pycache__') -ErrorAction SilentlyContinue
-# 3) this skill
+Get-ChildItem -Path $work -Recurse -Directory -Filter '__pycache__' |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+# 2) this skill
 $dest = Join-Path $work 'skills\blue-green-collab'
 New-Item -ItemType Directory -Force $dest | Out-Null
 Copy-Item (Join-Path $SkillDir '*') $dest -Recurse -Force -Exclude '__pycache__'

@@ -19,16 +19,20 @@ fork 一落后，就分不清"落后"到底影响什么。拆开之后：
 ```
 .
 ├── README.md
-├── manifest.tsv          # 补丁清单：repo / kind / path / 说明（TSV，bash 免依赖解析）
-├── apply_all.sh          # 应用（patch 走 git apply --check 校验；script 走自身 --root）
-├── revert_all.sh         # 逆序回退
-├── patches/
-│   ├── vllm-ascend/      # 0001-xxx.patch ...
-│   ├── vllm/
-│   └── afd-plugin/
-├── debug/                # 诊断包（run.sh / run_matrix.sh / apply_mxfp_variants.py ...）
+├── apply_all.sh          # 应用某个任务的 manifest（--task <id>；patch 走 git apply --check）
+├── revert_all.sh         # 逆序回退某个任务
+├── tasks/                # ★ 一个任务一个目录（多任务隔离，见 tasks/README.md）
+│   ├── README.md         #   任务登记表 + 命名/隔离规则
+│   └── <task-id>/
+│       ├── README.md     #   任务卡：目标 / 环境画像 / base commit / 状态 / 结论
+│       ├── manifest.tsv  #   该任务的改动清单
+│       ├── patches/<repo>/NNNN-*.patch
+│       └── debug/        #   该任务的一次性诊断脚本（幂等 + 锚点校验 + --revert）
+├── skills/blue-green-collab/   # 协作 skill（由 blue_publish.ps1 发布）
 └── tools/publish.ps1     # 在 Windows 中转机上发布本仓内容
 ```
+
+> 现有的一个任务：`tasks/dsv4-mxfp-a2a`（DSv4-Flash W4A8MXFP / EP8 混布 routing 入参）。
 
 ## base 版本（对照用，务必随绿区现状更新）
 
@@ -44,13 +48,13 @@ fork 一落后，就分不清"落后"到底影响什么。拆开之后：
 ## 绿区用法（一次性 alias + 每次两个词）
 
 ```bash
-# 一次性（走已批准通道输入）
+# 一次性（走已批准通道输入；green_bootstrap.sh 可直接生成这三行）
 alias dsv4sync='rm -rf /tmp/patchstack && git clone --quiet --depth 1 https://github.com/Pingzii/vllm-patchstack.git /tmp/patchstack && rm -rf /tmp/patchstack/.git'
-alias dsv4apply='cd /home/s00988495/AFD/vllm-ascend && bash /tmp/patchstack/apply_all.sh --root .'
-alias dsv4back='cd /home/s00988495/AFD/vllm-ascend && bash /tmp/patchstack/revert_all.sh --root .'
+alias dsv4run='bash /tmp/patchstack/scripts/green_run.sh'          # 同步→应用→跑→结论→自动还原
+alias dsv4back='bash /tmp/patchstack/scripts/green_run.sh --revert'
 
-# 每次
-dsv4sync && dsv4apply && bash /tmp/patchstack/debug/run.sh
+# 每次（多任务时加 --task <id>；只有一个任务可省略）
+dsv4sync && dsv4run
 dsv4back
 ```
 

@@ -1,32 +1,39 @@
 #!/usr/bin/env bash
-# 绿区一键：同步补丁栈 → 应用 → 运行实验 → 打印可外发结论 → （默认）还原工作区。
+# Green zone: sync patch stack -> apply one task -> run -> print the reportable line -> revert.
 #
-#   bash green_run.sh                 # 自动发现 vllm-ascend 检出
+#   bash green_run.sh                      # auto-detect repo root and task (if only one)
+#   bash green_run.sh --task <id>          # pick a specific task
 #   ROOT=/path/to/vllm-ascend bash green_run.sh
-#   bash green_run.sh --keep          # 跑完保留补丁（手工继续调试）
-#   bash green_run.sh --no-run        # 只同步 + 应用，不跑实验
-#   bash green_run.sh --revert        # 只还原
+#   bash green_run.sh --keep               # keep the patch applied afterwards
+#   bash green_run.sh --no-run             # sync + apply only
+#   bash green_run.sh --revert             # revert only
+#   bash green_run.sh --list               # list tasks in the patch stack
 #
-# 合规：仅 git clone（只读流入）+ 本地文件改动 + 本地进程 + /tmp 写入。
+# Compliance: clone/fetch (read-only inflow) + local file edits + local processes + /tmp only.
 set -euo pipefail
 
 PATCHSTACK_URL="${PATCHSTACK_URL:-https://github.com/Pingzii/vllm-patchstack.git}"
 PATCHSTACK="${PATCHSTACK:-/tmp/patchstack}"
-OUT="${OUT:-/tmp/dsv4_mxfp_sweep}"
-KEEP=0; NO_RUN=0; ONLY_REVERT=0; PS_SHA="?"
+OUT_BASE="${OUT:-/tmp/dsv4_mxfp_sweep}"
+KEEP=0; NO_RUN=0; ONLY_REVERT=0; PS_SHA="?"; TASK=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --keep)   KEEP=1; shift ;;
     --no-run) NO_RUN=1; shift ;;
     --revert) ONLY_REVERT=1; shift ;;
+    --task)   TASK="${2:-}"; shift 2 ;;
     --root)   ROOT="${2:-}"; shift 2 ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
-    *) echo "未知参数: $1" >&2; exit 2 ;;
+    --list)
+      [[ -d "$PATCHSTACK/tasks" ]] || { mkdir -p "$PATCHSTACK"; rm -rf "$PATCHSTACK"; git clone --quiet --depth 1 "$PATCHSTACK_URL" "$PATCHSTACK"; rm -rf "$PATCHSTACK/.git"; }
+      echo "available tasks:"; for d in "$PATCHSTACK"/tasks/*/; do [[ -d "$d" ]] && printf '  %s\n' "$(basename "$d")"; done
+      exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
-# --- 解析仓库根 ---
+# --- framework repo root ---
 if [[ -z "${ROOT:-}" ]]; then
   if ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n "$ROOT" && -d "$ROOT/vllm_ascend" ]]; then
     :
@@ -36,53 +43,73 @@ if [[ -z "${ROOT:-}" ]]; then
     done
   fi
 fi
-[[ -n "${ROOT:-}" && -d "$ROOT/vllm_ascend" ]] || { echo "找不到 vllm-ascend 检出；用 ROOT=<路径> 指定" >&2; exit 2; }
+[[ -n "${ROOT:-}" && -d "$ROOT/vllm_ascend" ]] || { echo "vllm-ascend checkout not found; pass ROOT=<path>" >&2; exit 2; }
 
 sync_patchstack() {
   rm -rf "$PATCHSTACK"
   git clone --quiet --depth 1 "$PATCHSTACK_URL" "$PATCHSTACK"
   PS_SHA="$(git -C "$PATCHSTACK" rev-parse --short HEAD 2>/dev/null || echo '?')"
-  rm -rf "$PATCHSTACK/.git"          # 绿区不留 git 状态
+  rm -rf "$PATCHSTACK/.git"          # leave no git state in the green zone
+}
+
+resolve_task() {
+  if [[ -n "$TASK" ]]; then return 0; fi
+  local found=() d
+  for d in "$PATCHSTACK"/tasks/*/; do [[ -d "$d" ]] && found+=("$(basename "$d")"); done
+  if [[ ${#found[@]} -eq 1 ]]; then
+    TASK="${found[0]}"
+  else
+    echo "multiple tasks; pass --task <id>:" >&2
+    for d in "${found[@]}"; do printf '  %s\n' "$d" >&2; done
+    exit 2
+  fi
 }
 
 echo "== repo       : $(basename "$ROOT")"
 echo "== repo HEAD  : $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo '?')"
 
 if [[ $ONLY_REVERT -eq 1 ]]; then
-  [[ -d "$PATCHSTACK" ]] || sync_patchstack
-  bash "$PATCHSTACK/revert_all.sh" --root "$ROOT"
+  [[ -d "$PATCHSTACK/tasks" ]] || sync_patchstack
+  resolve_task
+  bash "$PATCHSTACK/revert_all.sh" --root "$ROOT" --task "$TASK"
   rm -f "$ROOT/vllm_ascend/ops/fused_moe/token_dispatcher.py.bak"
   exit 0
 fi
 
 sync_patchstack
+resolve_task
+OUT="$OUT_BASE/$TASK"
 echo "== patchstack : $PS_SHA"
+echo "== task       : $TASK"
 
-bash "$PATCHSTACK/apply_all.sh" --root "$ROOT"
+bash "$PATCHSTACK/apply_all.sh" --root "$ROOT" --task "$TASK"
 
 mkdir -p "$OUT"
-if [[ $NO_RUN -eq 0 && -f "$PATCHSTACK/debug/run.sh" ]]; then
-  bash "$PATCHSTACK/debug/run.sh" || echo "[green_run] 实验脚本返回非零，见 $OUT" >&2
+if [[ $NO_RUN -eq 0 && -f "$PATCHSTACK/tasks/$TASK/debug/run.sh" ]]; then
+  bash "$PATCHSTACK/tasks/$TASK/debug/run.sh" || echo "[green_run] experiment returned non-zero, see $OUT" >&2
 fi
 
 REPORT="$OUT/report.txt"
 echo
-echo "==================== 可外发结论 ===================="
+echo "==================== reportable result ===================="
 if [[ -f "$REPORT" ]]; then
-  if ! grep -m1 '^FINGERPRINT:' "$REPORT"; then
-    echo "(report 无 FINGERPRINT，给最后 5 行)"
+  line="$(grep -m1 '^FINGERPRINT:' "$REPORT" || true)"
+  if [[ -n "$line" ]]; then
+    echo "${line/FINGERPRINT:/FINGERPRINT $TASK:}"
+  else
+    echo "(no FINGERPRINT in report; last 5 lines)"
     tail -5 "$REPORT"
   fi
 else
-  echo "(没有 $REPORT；检查 debug/run.sh 是否生成报告)"
+  echo "(no $REPORT; check tasks/$TASK/debug/run.sh)"
 fi
-echo "==================================================="
-echo "日志目录（勿外发）：$OUT"
+echo "=========================================================="
+echo "logs (do not export): $OUT"
 
 if [[ $KEEP -eq 0 ]]; then
-  bash "$PATCHSTACK/revert_all.sh" --root "$ROOT" >/dev/null
+  bash "$PATCHSTACK/revert_all.sh" --root "$ROOT" --task "$TASK" >/dev/null
   rm -f "$ROOT/vllm_ascend/ops/fused_moe/token_dispatcher.py.bak"
-  echo "[green_run] 工作区已还原（--keep 可保留补丁）"
+  echo "[green_run] worktree restored (use --keep to keep the patch)"
 else
-  echo "[green_run] 已保留补丁；还原： bash $0 --revert"
+  echo "[green_run] patch kept; revert with: bash $0 --revert"
 fi
