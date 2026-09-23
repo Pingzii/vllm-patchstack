@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blue/Green Zone Collaboration"
+  short_description: "Ship patches into an isolated zone and get one line back"
+  default_prompt: "Use $blue-green-collab to publish the current patch stack and run one experiment in the green zone."
