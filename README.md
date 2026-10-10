@@ -32,7 +32,9 @@ fork 一落后，就分不清"落后"到底影响什么。拆开之后：
 └── tools/publish.ps1     # 在 Windows 中转机上发布本仓内容
 ```
 
-> 现有的一个任务：`tasks/dsv4-mxfp-a2a`（DSv4-Flash W4A8MXFP / EP8 混布 routing 入参）。
+> 现有任务：
+> - `tasks/dsv4-mxfp-a2a`（DSv4-Flash W4A8MXFP / EP8 混布 routing 入参）
+> - `tasks/mc2-dispatch-extscale`（A5：MC2 dispatch 能否接外部 fp8 + e8m0 scale，纯算子级探针）
 
 ## base 版本（对照用，务必随绿区现状更新）
 

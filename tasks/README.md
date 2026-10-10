@@ -8,6 +8,7 @@
 | task-id | 标题 | 状态 | base（对照） | 最近结论 |
 |---|---|---|---|---|
 | `dsv4-mxfp-a2a` | DSv4-Flash W4A8MXFP：EP8 混布 ALLTOALL routing 入参 | 进行中（等绿区 A~E 结果） | vllm-ascend `<待填>` | — |
+| `mc2-dispatch-extscale` | A5：外部量化数据 + e8m0 scale 能否过 FFN 侧 dispatch（MC2 跨卡 4 变体 + routing 单卡 4 变体） | 等绿区结果 | 无（纯算子级，不依赖框架检出） | — |
 
 > 新增任务：`cp -r tasks/dsv4-mxfp-a2a tasks/<new-id>` 后清空内容，或直接建目录 + `manifest.tsv`，
 > 然后在本表登记一行。

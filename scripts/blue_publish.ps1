@@ -1,61 +1,85 @@
-# Blue zone / transfer host: publish the patch stack + debug package + this skill.
+# Blue zone / transfer host: publish the patch stack.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1 -RepoUrl https://github.com/Pingzii/vllm-patchstack.git
+#   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1 -Message "add mc2-dispatch-extscale"
+#   powershell -ExecutionPolicy Bypass -File scripts\blue_publish.ps1 -DryRun
 #
-# NEVER run this in the green zone: the green zone is read-only and any outbound
-# write (push/upload) is a compliance violation.
+# Publishes THIS directory tree (changes only -- never a full framework tree) to
+# the patch-stack repo. Clones the remote into a temp dir, overlays the local
+# files, commits with sign-off, and pushes.
 #
+# NEVER run this from the green zone (it is read-only and must not push).
 # NOTE: keep this file ASCII-only. Windows PowerShell 5.1 reads .ps1 as ANSI
-# unless a BOM is present, so non-ASCII comments break parsing on CN systems.
+# when there is no BOM, so non-ASCII text here would be mangled.
+
+[CmdletBinding()]
 param(
-    [string]$RepoUrl    = "https://github.com/Pingzii/vllm-patchstack.git",
-    [string]$Branch     = "main",
-    [string]$Workspace  = "",
-    [string]$Patchstack = "",
-    [string]$SkillDir   = ""
+    [string]$RepoUrl  = "https://github.com/Pingzii/vllm-patchstack.git",
+    [string]$Branch   = "main",
+    [string]$Message  = "chore(patchstack): sync tasks and probe",
+    [switch]$DryRun
 )
+
 $ErrorActionPreference = "Stop"
 
-$skillRoot = Split-Path -Parent $PSScriptRoot
-if (-not $Workspace)  { $Workspace  = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $skillRoot)) }
-if (-not $Patchstack) { $Patchstack = Join-Path $Workspace 'vllm-patchstack' }
-if (-not $SkillDir)   { $SkillDir   = $skillRoot }
-
-if (-not (Test-Path (Join-Path $Patchstack 'tasks'))) { throw "patch stack working copy not found (no tasks/): $Patchstack" }
-if (-not (Test-Path (Join-Path $Patchstack 'apply_all.sh'))) { throw "patch stack working copy looks incomplete: $Patchstack" }
-if (-not (git config --get user.name)) { throw "set git config --global user.name first" }
-
+# Repo root = parent of this script's directory.
+$here = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $work = Join-Path $env:TEMP ("patchstack-pub-" + (Get-Random))
-$env:GIT_TERMINAL_PROMPT = '0'
-Write-Host "[publish] repo=$RepoUrl"
-Write-Host "[publish] patchstack=$Patchstack"
-Write-Host "[publish] skill=$SkillDir"
+
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "git not found on PATH"
+}
+$userName = (git config --get user.name) 2>$null
+if (-not $userName) { throw "run: git config --global user.name ""Your Name"" (and user.email) first" }
+
+Write-Host "[publish] source   : $here"
+Write-Host "[publish] remote   : $RepoUrl ($Branch)"
+Write-Host "[publish] work dir : $work"
+
+if (Test-Path $work) { Remove-Item -Recurse -Force $work }
 
 git clone --quiet $RepoUrl $work
-if ($LASTEXITCODE -ne 0) { throw "clone failed: $RepoUrl" }
+if ($LASTEXITCODE -ne 0) { throw "git clone failed: $RepoUrl" }
 
-# 1) mirror the working copy: wipe everything but .git so deleted files really disappear
-Get-ChildItem -Force $work | Where-Object { $_.Name -ne '.git' } | Remove-Item -Recurse -Force
-Copy-Item (Join-Path $Patchstack '*') $work -Recurse -Force
-Copy-Item (Join-Path $Patchstack '.gitignore') $work -Force -ErrorAction SilentlyContinue
-Get-ChildItem -Path $work -Recurse -Directory -Filter '__pycache__' |
+# Overlay the local tree. Copy-Item will not delete remote-only files; stale
+# files must be removed by hand if that ever matters.
+Copy-Item (Join-Path $here '*') $work -Recurse -Force
+Get-ChildItem -Path $work -Recurse -Force -Directory -Filter '__pycache__' |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-# 2) this skill
-$dest = Join-Path $work 'skills\blue-green-collab'
-New-Item -ItemType Directory -Force $dest | Out-Null
-Copy-Item (Join-Path $SkillDir '*') $dest -Recurse -Force -Exclude '__pycache__'
-# 3) mirror the skill scripts at a short stable path for the one-line green entry
-#    (raw URL: .../main/scripts/onekey.sh)
-$shortScripts = Join-Path $work 'scripts'
-New-Item -ItemType Directory -Force $shortScripts | Out-Null
-Copy-Item (Join-Path $SkillDir 'scripts\*') $shortScripts -Recurse -Force -Exclude '__pycache__'
 
-Set-Location $work
-git checkout -B $Branch
-git -c core.autocrlf=false add -A
-git commit -q -s -m "chore(skill): sync blue-green-collab + debug package"
-git push --quiet -u origin $Branch
-"PUSH_EXIT=$LASTEXITCODE"
-git log --oneline -1
-git ls-tree -r --name-only HEAD
+Push-Location $work
+try {
+    git checkout -B $Branch | Out-Null
+
+    $status = git status --porcelain
+    if (-not $status) {
+        Write-Host "[publish] nothing changed -- remote is already up to date."
+        return
+    }
+
+    Write-Host "[publish] changes to commit:"
+    $status | ForEach-Object { Write-Host "    $_" }
+
+    if ($DryRun) {
+        Write-Host "[publish] -DryRun: stopping before commit/push."
+        return
+    }
+
+    # core.autocrlf=false keeps the shell scripts byte-identical for the green zone.
+    git -c core.autocrlf=false add -A
+    git -c core.autocrlf=false commit -q -s -m $Message
+    if ($LASTEXITCODE -ne 0) { throw "git commit failed" }
+
+    git push --quiet -u origin $Branch
+    if ($LASTEXITCODE -ne 0) { throw "git push failed (check credentials / branch protection)" }
+
+    Write-Host "[publish] OK"
+    git log --oneline -1
+    Write-Host ""
+    Write-Host "[publish] green zone command:"
+    Write-Host "  rm -rf /tmp/patchstack && git clone --quiet --depth 1 $RepoUrl /tmp/patchstack && rm -rf /tmp/patchstack/.git"
+}
+finally {
+    Pop-Location
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+}
